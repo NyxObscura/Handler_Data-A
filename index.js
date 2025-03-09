@@ -3,7 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const axios = require('axios');
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.use(express.json());
 const upload = multer({ storage: multer.memoryStorage() });
@@ -44,24 +44,25 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 app.get('/file/:filename', async (req, res) => {
   try {
     const filename = req.params.filename;
-    const filePath = `file/${filename}`;
 
     // Cek apakah file ada di GitHub
-    await githubRequest('GET', filePath);
+    await githubRequest('GET', filename);
 
-    // Redirect ke CDN yang diinginkan
-    const fileUrl = `${process.env.BASE_URL}/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/${process.env.GITHUB_BRANCH}/${filePath}`;
-    res.redirect(fileUrl);
+    // Redirect ke CDN dengan format cdn.obscuraworks.com/(namafile)
+    const cdnUrl = `https://cdn.obscuraworks.com/${filename}`;
+    res.redirect(cdnUrl);
   } catch (err) {
     res.status(404).json({ error: 'File not found' });
   }
 });
+
 // **3. Rename File dalam Folder "file/"**
 app.patch('/rename/:filename', async (req, res) => {
   try {
     const { newName } = req.body;
     const oldFilename = req.params.filename;
     
+    // Dapatkan informasi file lama
     const response = await githubRequest('GET', oldFilename);
     const sha = response.data.sha;
     const content = response.data.content;
