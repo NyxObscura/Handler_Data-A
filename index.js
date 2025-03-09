@@ -8,24 +8,15 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 const upload = multer({ storage: multer.memoryStorage() });
 
-const GITHUB_API = `https://api.github.com/repos/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/contents/file/`; // Semua file ada di dalam folder "file"
+const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/main/file/`; // Path ke folder "file" di repo GitHub
 
-async function githubRequest(method, path, content = null, sha = null) {
-  const headers = {
-    Authorization: `token ${process.env.GITHUB_TOKEN}`,
-    Accept: 'application/vnd.github.v3+json',
-  };
-
-  const data = content
-    ? { message: 'API Commit', content, sha }
-    : undefined;
-
-  return axios({
-    method,
-    url: GITHUB_API + path,
-    headers,
-    data,
-  });
+async function checkFileExists(filename) {
+  try {
+    const response = await axios.get(GITHUB_RAW_URL + filename);
+    return response.status === 200; // File ada jika status 200
+  } catch (err) {
+    return false; // File tidak ada
+  }
 }
 
 // **1. Upload File ke Folder "file/" dalam Repo GitHub**
@@ -33,7 +24,19 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     const content = req.file.buffer.toString('base64');
     const filename = req.file.originalname;
-    await githubRequest('PUT', filename, content);
+    const response = await axios.put(
+      `https://api.github.com/repos/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/contents/file/${filename}`,
+      {
+        message: 'Upload file via API',
+        content: content,
+      },
+      {
+        headers: {
+          Authorization: `token ${process.env.GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+      }
+    );
     res.status(200).json({ message: 'File uploaded successfully' });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.message || err.message });
@@ -45,14 +48,17 @@ app.get('/file/:filename', async (req, res) => {
   try {
     const filename = req.params.filename;
 
-    // Cek apakah file ada di GitHub
-    await githubRequest('GET', filename);
-
-    // Redirect ke CDN dengan format cdn.obscuraworks.com/(namafile)
-    const cdnUrl = `https://cdn.obscuraworks.com/${filename}`;
-    res.redirect(cdnUrl);
+    // Cek apakah file ada di GitHub menggunakan raw.githubusercontent.com
+    const fileExists = await checkFileExists(filename);
+    if (fileExists) {
+      // Redirect ke CDN dengan format cdn.obscuraworks.com/(namafile)
+      const cdnUrl = `https://cdn.obscuraworks.com/${filename}`;
+      res.redirect(cdnUrl);
+    } else {
+      res.status(404).json({ error: 'File not found' });
+    }
   } catch (err) {
-    res.status(404).json({ error: 'File not found' });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -61,16 +67,49 @@ app.patch('/rename/:filename', async (req, res) => {
   try {
     const { newName } = req.body;
     const oldFilename = req.params.filename;
-    
+
     // Dapatkan informasi file lama
-    const response = await githubRequest('GET', oldFilename);
-    const sha = response.data.sha;
-    const content = response.data.content;
+    const oldFileResponse = await axios.get(
+      `https://api.github.com/repos/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/contents/file/${oldFilename}`,
+      {
+        headers: {
+          Authorization: `token ${process.env.GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+      }
+    );
+    const sha = oldFileResponse.data.sha;
+    const content = oldFileResponse.data.content;
 
     // Hapus file lama
-    await githubRequest('DELETE', oldFilename, null, sha);
+    await axios.delete(
+      `https://api.github.com/repos/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/contents/file/${oldFilename}`,
+      {
+        headers: {
+          Authorization: `token ${process.env.GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+        data: {
+          message: 'Delete old file via API',
+          sha: sha,
+        },
+      }
+    );
+
     // Buat file baru dengan nama yang diperbarui
-    await githubRequest('PUT', newName, content);
+    await axios.put(
+      `https://api.github.com/repos/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/contents/file/${newName}`,
+      {
+        message: 'Rename file via API',
+        content: content,
+      },
+      {
+        headers: {
+          Authorization: `token ${process.env.GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+      }
+    );
 
     res.status(200).json({ message: 'File renamed successfully' });
   } catch (err) {
@@ -82,9 +121,34 @@ app.patch('/rename/:filename', async (req, res) => {
 app.delete('/delete/:filename', async (req, res) => {
   try {
     const filename = req.params.filename;
-    const response = await githubRequest('GET', filename);
-    const sha = response.data.sha;
-    await githubRequest('DELETE', filename, null, sha);
+
+    // Dapatkan informasi file
+    const fileResponse = await axios.get(
+      `https://api.github.com/repos/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/contents/file/${filename}`,
+      {
+        headers: {
+          Authorization: `token ${process.env.GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+      }
+    );
+    const sha = fileResponse.data.sha;
+
+    // Hapus file
+    await axios.delete(
+      `https://api.github.com/repos/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/contents/file/${filename}`,
+      {
+        headers: {
+          Authorization: `token ${process.env.GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+        data: {
+          message: 'Delete file via API',
+          sha: sha,
+        },
+      }
+    );
+
     res.status(200).json({ message: 'File deleted successfully' });
   } catch (err) {
     res.status(404).json({ error: 'File not found' });
