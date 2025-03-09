@@ -44,13 +44,18 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 app.get('/file/:filename', async (req, res) => {
   try {
     const filename = req.params.filename;
-    await githubRequest('GET', filename);
-    res.redirect(`${process.env.BASE_URL}/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/${process.env.GITHUB_BRANCH}/file/${filename}`);
+    const filePath = `file/${filename}`;
+
+    // Cek apakah file ada di GitHub
+    await githubRequest('GET', filePath);
+
+    // Redirect ke CDN yang diinginkan
+    const fileUrl = `${process.env.BASE_URL}/${process.env.GITHUB_USERNAME}/${process.env.GITHUB_REPO}/${process.env.GITHUB_BRANCH}/${filePath}`;
+    res.redirect(fileUrl);
   } catch (err) {
     res.status(404).json({ error: 'File not found' });
   }
 });
-
 // **3. Rename File dalam Folder "file/"**
 app.patch('/rename/:filename', async (req, res) => {
   try {
